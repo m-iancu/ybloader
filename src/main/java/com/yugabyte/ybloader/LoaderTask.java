@@ -1,29 +1,30 @@
 package com.yugabyte.ybloader;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.text.SimpleDateFormat;
+import java.util.List;
+import java.util.Locale;
+import java.util.Scanner;
+import java.util.UUID;
+import java.util.concurrent.Callable;
+
 import com.datastax.driver.core.BatchStatement;
+import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.UDTValue;
 import com.datastax.driver.core.UserType;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.text.SimpleDateFormat;
-import java.util.List;
-import java.util.Locale;
-import java.util.Scanner;
-import java.util.UUID;
-
 
 /**
  * Load one file.
  */
-class LoaderTask {
+class LoaderTask implements Callable<Pair<Integer, Long>> {
 
-  private Session session;
-  private PreparedStatement statement;
+  private final Cluster cluster;
+  private final String statement;
   private BatchStatement batch = new BatchStatement(BatchStatement.Type.UNLOGGED);
 
   private List<DataType> colTypes;
@@ -31,7 +32,7 @@ class LoaderTask {
 
   // Settings
   private int batchSize = 150;
-  private int logStatsFrequency = 2000; // log every n rows processed.
+  private int logStatsFrequency = 10000; // log every n rows processed.
   private boolean enableExtraLogging = false;
 
   // Stats
@@ -50,8 +51,8 @@ class LoaderTask {
   private String currentLine;
   private int currentPos = 0; // within the current line
 
-  LoaderTask(Session session, PreparedStatement statement, File inFile, List<DataType> colTypes) {
-    this.session = session;
+  LoaderTask(Cluster cluster, String statement, File inFile, List<DataType> colTypes) {
+    this.cluster = cluster;
     this.statement = statement;
     this.inFile = inFile;
     this.colTypes = colTypes;
@@ -60,45 +61,39 @@ class LoaderTask {
   /**
    * Traverse input file and process each line.
    */
-  void load() throws IOException {
-    FileInputStream inputStream = null;
-    Scanner sc = null;
-    try {
-      inputStream = new FileInputStream(inFile);
-      sc = new Scanner(inputStream, "UTF-8");
+  public Pair<Integer, Long> call() throws Exception {
+    try (FileInputStream inputStream = new FileInputStream(inFile);
+         Scanner sc = new Scanner(inputStream, "UTF-8");
+         Session session = cluster.newSession()){
+
+      PreparedStatement preparedStatement = session.prepare(statement);
+
       startTimeMillis = System.currentTimeMillis();
       while (sc.hasNextLine()) {
         String line = sc.nextLine();
-        processLine(line);
+        processLine(session, preparedStatement, line);
         numRowsProcessed++;
         if (numRowsProcessed % logStatsFrequency == 0) {
           long duration = System.currentTimeMillis() - startTimeMillis;
           System.out.println("Processed " + numRowsProcessed + " rows in " +
-              duration / 1000 + "." + (duration % 1000 / 10) + " seconds");
+                  duration / 1000 + "." + (duration % 1000 / 10) + " seconds");
         }
       }
       // If there are leftover stmts in the batch, execute them.
       if (batch.size() > 0) {
         session.executeAsync(batch);
       }
-      // If there are leftover, unlogged rows, report them.
-      if (numRowsProcessed % logStatsFrequency != 0) {
-        long duration = System.currentTimeMillis() - startTimeMillis;
-        System.out.println("Processed " + numRowsProcessed + " rows in " +
-            duration / 1000 + "." + (duration % 1000 / 10) + " seconds");
-      }
       // note that Scanner suppresses exceptions
       if (sc.ioException() != null) {
         throw sc.ioException();
       }
-    } finally {
-      if (inputStream != null) {
-        inputStream.close();
-      }
-      if (sc != null) {
-        sc.close();
+      // If there are leftover, unlogged rows, report them.
+      if (numRowsProcessed % logStatsFrequency != 0) {
+        long duration = System.currentTimeMillis() - startTimeMillis;
+        return new Pair<>(numRowsProcessed, duration);
       }
     }
+    return null;
   }
 
   /**
@@ -107,7 +102,7 @@ class LoaderTask {
    * Leftover stmts (if any) will be executed at the end in the load() function.
    * @param line the current line.
    */
-  private void processLine(String line) {
+  private void processLine(Session session, PreparedStatement preparedStatement, String line) {
     currentPos = 0;
     currentLine = line;
     try {
@@ -119,7 +114,7 @@ class LoaderTask {
         log("Got value: " + values[i].toString());
         i++;
       }
-      batch.add(statement.bind(values));
+      batch.add(preparedStatement.bind(values));
       if (batch.size() >= batchSize) {
         session.executeAsync(batch);
         batch.clear();
