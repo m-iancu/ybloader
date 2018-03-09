@@ -187,8 +187,15 @@ class LoaderTask implements Callable<Pair<Integer, Long>> {
       currentPos++;
     }
 
-    log("Parsed simple value: " + sb.toString());
-    return sb.toString();
+    // NOTE: this is a gross hack. we should instead make sure that quote handling above is better handled at first and
+    // last position, effectively making the quote process optional
+    String result;
+    if (sb.length() > 1 && sb.charAt(0) == '"' && sb.charAt(sb.length()-1) == '"') {
+      result = sb.substring(1, sb.length()-1);
+    } else {
+      result = sb.toString();
+    }
+    return result;
   }
 
   /**
