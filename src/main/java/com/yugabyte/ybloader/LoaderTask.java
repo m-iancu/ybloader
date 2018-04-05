@@ -31,7 +31,7 @@ class LoaderTask implements Callable<Pair<Integer, Long>> {
   private File inFile;
 
   // Settings
-  private int batchSize = 150;
+  private final int batchSize;
   private int logStatsFrequency = 10000; // log every n rows processed.
   private boolean enableExtraLogging = false;
 
@@ -51,11 +51,12 @@ class LoaderTask implements Callable<Pair<Integer, Long>> {
   private String currentLine;
   private int currentPos = 0; // within the current line
 
-  LoaderTask(Cluster cluster, String statement, File inFile, List<DataType> colTypes) {
+  LoaderTask(Cluster cluster, String statement, File inFile, List<DataType> colTypes, int batchSize) {
     this.cluster = cluster;
     this.statement = statement;
     this.inFile = inFile;
     this.colTypes = colTypes;
+    this.batchSize = batchSize;
   }
 
   /**
@@ -81,7 +82,7 @@ class LoaderTask implements Callable<Pair<Integer, Long>> {
       }
       // If there are leftover stmts in the batch, execute them.
       if (batch.size() > 0) {
-        session.executeAsync(batch);
+        session.execute(batch);
       }
       // note that Scanner suppresses exceptions
       if (sc.ioException() != null) {
@@ -116,7 +117,7 @@ class LoaderTask implements Callable<Pair<Integer, Long>> {
       }
       batch.add(preparedStatement.bind(values));
       if (batch.size() >= batchSize) {
-        session.executeAsync(batch);
+        session.execute(batch);
         batch.clear();
       }
     } catch (Exception e) {

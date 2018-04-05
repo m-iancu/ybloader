@@ -31,6 +31,7 @@ public class YbLoader {
   private static final Option HOST = new Option("h", "host", true, "Yugabyte server host.");
   private static final Option COLUMNS = new Option("c", "columns", true, "The list of columns in a comma delimted format. It must match the CSV file format.");
   private static final Option PARALLELISM = new Option("p", "parallelism", true, "The parallelism of loading. By default set to 1.");
+  private static final Option BATCH_SIZE = new Option("b", "batch", true, "The batch size. By default set to 150.");
 
   private static final Options ALL_OPTIONS = new Options();
 
@@ -47,6 +48,7 @@ public class YbLoader {
     ALL_OPTIONS.addOption(HOST);
     ALL_OPTIONS.addOption(COLUMNS);
     ALL_OPTIONS.addOption(PARALLELISM);
+    ALL_OPTIONS.addOption(BATCH_SIZE);
   }
 
   public static void main(String[] args) {
@@ -61,9 +63,14 @@ public class YbLoader {
       String columnsInput = commandLine.getOptionValue(COLUMNS.getOpt());
 
       int parallelism = 1;
+      int batchSize = 150;
 
       if (commandLine.hasOption(PARALLELISM.getOpt())) {
          parallelism = Integer.parseInt(commandLine.getOptionValue(PARALLELISM.getOpt()));
+      }
+
+      if (commandLine.hasOption(BATCH_SIZE.getOpt())) {
+        batchSize = Integer.parseInt(commandLine.getOptionValue(BATCH_SIZE.getOpt()));
       }
 
       FileLister lister = new FileLister(filePattern);
@@ -89,7 +96,7 @@ public class YbLoader {
       List<DataType> columnTypes = createColumnTypes(cluster, keyspaceName, tableName, columns);
 
       for (File file: files) {
-        workToExecute.put(file, executorService.submit(new LoaderTask(cluster, statement, file,  columnTypes)));
+        workToExecute.put(file, executorService.submit(new LoaderTask(cluster, statement, file,  columnTypes, batchSize)));
       }
 
       int numFiles = files.size();
