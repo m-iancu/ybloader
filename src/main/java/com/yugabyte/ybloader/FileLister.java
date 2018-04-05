@@ -23,7 +23,7 @@ public class FileLister {
             return Collections.emptyList();
         }
         List<File> result = Lists.newLinkedList();
-        for (File file: files) {
+        for (File file : files) {
             Matcher matcher = filePattern.matcher(file.getName());
             if (matcher.matches()) {
                 result.add(file);
